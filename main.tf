@@ -37,21 +37,16 @@ resource "terraform_data" "main" {
   }
 }
 
-
 resource "aws_ec2_instance_state" "main" {
   instance_id = aws_instance.main.id
   state       = "stopped"
-  depends_on = [ terraform_data.main ]
-
-
+  depends_on = [terraform_data.main]
 }
-
-
 
 resource "aws_ami_from_instance" "main" {
   name               = "${var.project}-${var.environment}-${var.component}"
   source_instance_id = aws_instance.main.id
-  depends_on = [ aws_ec2_instance_state.main ]
+  depends_on = [aws_ec2_instance_state.main]
   tags = merge(
     {
         Name = "${var.project}-${var.environment}-${var.component}"
@@ -60,94 +55,69 @@ resource "aws_ami_from_instance" "main" {
   )
 }
 
-# Create target group
-
 resource "aws_lb_target_group" "main" {
   name     = "${var.project}-${var.environment}-${var.component}"
   port     = local.port_number
   protocol = "HTTP"
   vpc_id   = local.vpc_id
   deregistration_delay = 60
+
   health_check {
     healthy_threshold = 2
     interval = 10
     matcher = "200-299"
-    path= local.health_check_path
+    path = local.health_check_path
     port = local.port_number
     protocol = "HTTP"
     timeout = 2
     unhealthy_threshold = 3
-
   }
 }
 
-
-# Create launch template
-
 resource "aws_launch_template" "main" {
   name = "${var.project}-${var.environment}-${var.component}"
-
-  
   image_id = aws_ami_from_instance.main.id
 
-
-# Once autoscaling sees the less traffic it will terminate the instances
+  # once autoscaling sees less traffic, it will terminate the instance
   instance_initiated_shutdown_behavior = "terminate"
-
-  
   instance_type = "t3.micro"
-
   vpc_security_group_ids = [local.sg_id]
 
   # each time we apply terraform this version will be updated as default
   update_default_version = true
-  # tags for instances created by launch template through auto scaling
+  
+  # tags for instances created by launch template through autoscaling
   tag_specifications {
     resource_type = "instance"
 
-    tags =  merge (
-          {
-
-
-          Name = "${var.project}-${var.environment}-${var.component}"
+    tags = merge(
+        {
+            Name = "${var.project}-${var.environment}-${var.component}"
         },
-          local.common_tags
+        local.common_tags
     )
   }
-
-  # Tags for volumes created by instances
-
+  # tags for volumes created by instances
   tag_specifications {
     resource_type = "volume"
 
-    tags =  merge (
-          {
-
-
-          Name = "${var.project}-${var.environment}-${var.component}"
+    tags = merge(
+        {
+            Name = "${var.project}-${var.environment}-${var.component}"
         },
-          local.common_tags
+        local.common_tags
     )
   }
-# tags for launch template
-  tags = merge (
-
-    {
-
-      Name = "${var.project}-${var.environment}-${var.component}"
-    },
-
-    local.common_tags
-  )
-
-  
+  # tags for launch template
+  tags = merge(
+        {
+            Name = "${var.project}-${var.environment}-${var.component}"
+        },
+        local.common_tags
+    )
 }
 
-
-
-# Creating auto scaling
-
- resource "aws_autoscaling_group" "main" {
+resource "aws_autoscaling_group" "main" {
   name                      = "${var.project}-${var.environment}-${var.component}"
   max_size                  = 10
   min_size                  = 1
@@ -155,7 +125,7 @@ resource "aws_launch_template" "main" {
   health_check_type         = "ELB"
   desired_capacity          = 1
   force_delete              = false
-  
+
   launch_template {
     id      = aws_launch_template.main.id
     version = "$Latest"
@@ -170,41 +140,35 @@ resource "aws_launch_template" "main" {
     preferences {
       min_healthy_percentage = 50
     }
-    triggers = ["launch_template"]    # here old instances will be deleted and new one's will be created
+    triggers = ["launch_template"]
   }
 
- 
   dynamic "tag" {
-    for_each = merge (
-          {
-
-
-          Name = "${var.project}-${var.environment}-${var.component}"
+    for_each = merge(
+        {
+            Name = "${var.project}-${var.environment}-${var.component}"
         },
-          local.common_tags
+        local.common_tags
     )
     content {
-
-    key                 = tag.key
-    value               = tag.value
-    propagate_at_launch = true
-      
+      key                 = tag.key
+      value               = tag.value
+      propagate_at_launch = true
     }
-    
   }
-# with in 15 minutes autoscaling should be successful in any case if it not created in 15 minutes it will be deleted
+
+  # with in 15min autoscaling should be successful
   timeouts {
     delete = "15m"
   }
+}
 
- }
-
-
- resource "aws_autoscaling_policy" "main" {
+resource "aws_autoscaling_policy" "main" {
   autoscaling_group_name = aws_autoscaling_group.main.name
   name                   = "${var.project}-${var.environment}-${var.component}"
-  policy_type = "TargetTrackingScaling"
-  estimated_instance_warmup = 120 # by default if we didn't specify it wil consider 300 seconds
+  policy_type            = "TargetTrackingScaling"
+  estimated_instance_warmup = 120
+
   target_tracking_configuration {
     predefined_metric_specification {
       predefined_metric_type = "ASGAverageCPUUtilization"
@@ -212,11 +176,10 @@ resource "aws_launch_template" "main" {
 
     target_value = 70.0
   }
-  
 }
-# This is depends on target group
 
-# if frontend frontend-dev.devopsskillup.online
+# This depends on target group
+# if frontend frontend-dev.daws88s.online
 resource "aws_lb_listener_rule" "main" {
   listener_arn = local.alb_listener_arn
   priority     = var.rule_priority
@@ -237,14 +200,10 @@ resource "terraform_data" "main_delete" {
   triggers_replace = [
     aws_instance.main.id
   ]
-  depends_on = [ aws_autoscaling_policy.main ]
-
-# This will execute in bastion server
+  depends_on = [aws_autoscaling_policy.main]
+  
+  # it executes in bastion
   provisioner "local-exec" {
-    command = "aws ec2 terminate-instances --instance-ids ${aws_instance.main.id}"
+    command = "aws ec2 terminate-instances --instance-ids ${aws_instance.main.id} "
   }
 }
-
-
-
-
